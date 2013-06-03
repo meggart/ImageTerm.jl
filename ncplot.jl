@@ -1,26 +1,60 @@
 using NetCDF
 include("imageterm.jl")
-function ncplot(fn::String)
-  
+
+function ncplot(fn::String;hd=false,col::MapCols=heatscale,timavg=true)
   nc = NetCDF.open(fn)
   for va in nc.vars
     v=va[2]
-    if ((v.ndim>1) && (v.ndim<4))
-      if v.ndim==2
-        a=nc.readvar(nc,v,[1,1],[-1,-1])
-      elseif v.ndim==3
-        #Average over all time steps
-        ntime=v.dim[3].dimlen
-        a=NetCDF.readvar(nc,v,[1,1,1],[-1,-1,1])
-        #if ntime>1
-        #  for i=2:ntime
-        #    a=a+NetCDF.readvar(nc,v,[1,1,i],[-1,-1,1])
-        #  end
-        #  a=(a./ntime)[:,:,1]
-        #end
+    totranspose=(lowercase(v.dim[1].name)[1:3]=="lon")
+    if ((v.ndim==3) && (timavg==false))
+      ncplotallsteps(nc,v,hd,col,totranspose)
+    else
+      if ((v.ndim>1) && (v.ndim<4))
+        if v.ndim==2
+          a=NetCDF.readvar(nc,v,[1,1],[-1,-1])
+        elseif v.ndim==3
+          a = readtimavg(nc,v) 
+        end
+        # Transpose if lon is first dimension
+        if (totranspose)
+          a=transpose(a)
+        end
+        missval = has(v.atts,"missing_value") ? v.atts["missing_value"] : 1.0e32
+        imageterm(a,missval=missval,hd=hd,col=col)
       end
-      missval = has(v.atts,"missing_value") ? v.atts["missing_value"] : 1.0e32
-      imageterm(a,missval=missval)
     end
   end
+end
+
+function ncplotallsteps(nc,v,hd,col,totranspose)
+  missval = has(v.atts,"missing_value") ? v.atts["missing_value"] : 1.0e32
+  for i in 1:v.dim[3].dimlen
+    a=NetCDF.readvar(nc,v,[1,1,i],[-1,-1,1])[:,:,1]
+    if (totranspose)
+      a=transpose(a)
+    end
+    println("Time step $i of $(v.dim[3].dimlen):")
+    imageterm(a,missval=missval,hd=hd,col=col)
+  end
+end
+
+function readtimavg(nc::NcFile,v::NcVar)
+  #Average over all time steps
+        missval = has(v.atts,"missing_value") ? v.atts["missing_value"] : 1.0e32
+        ntime=v.dim[3].dimlen
+        a=NetCDF.readvar(nc,v,[1,1,1],[-1,-1,1])
+        ncount=(a.==missval)*1
+        if ntime>1
+          a[a.==missval]=zero(a[1,1,1])
+          for i=2:ntime
+            ar=NetCDF.readvar(nc,v,[1,1,i],[-1,-1,1])
+            ncount=ncount+(ar.!=missval)*1
+            ar[ar.==missval]=zero(ar[1,1,1])
+            a=a+ar
+            ncount=ncount+(a.!=missval)*1
+          end
+          a=(a./ncount)[:,:,1]
+          a[isnan(a)]=missval
+        end
+      return(a)
 end
