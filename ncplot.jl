@@ -1,5 +1,5 @@
 using NetCDF
-include("imageterm.jl")
+using ImageTerm
 
 function ncplot(fn::String;hd=false,col::MapCols=heatscale,timavg=true)
   nc = NetCDF.open(fn)

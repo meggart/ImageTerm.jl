@@ -43,7 +43,12 @@ function rwbramp(v::Real)
 end
 
 function byrramp(v::Real)
-  return(v < 0.5 ? colstr(2.0*v,2.0*v,0.0) : colstr(1.0,2.0*(1.0-v),0.0))
+  try
+    return(v < 0.5 ? colstr(2.0*v,2.0*v,0.0) : colstr(1.0,2.0*(1.0-v),0.0))
+  catch
+    println("An error v=$v")
+    return(colstr(0.0,0.0,0.0))
+  end
 end
 
 type MapCols
@@ -99,7 +104,7 @@ function imageterm(a::Array;col::MapCols=heatscale,missval::Number=1.0e32,hd::Bo
     for j=1:rfac:ldim[2]
       subartop=anorm[i:min((i+rfac-1),end),j:min((j+rfac-1),end)]
       if (sum(subartop.==missval)<0.5*length(subartop))
-        mtop=mean(subartop[subartop!=missval])
+        mtop=mean(subartop[subartop.!=missval])
         ctop=col.colfunc(mtop)
       else
         ctop=col.missval
@@ -107,7 +112,7 @@ function imageterm(a::Array;col::MapCols=heatscale,missval::Number=1.0e32,hd::Bo
       if (hdfac > 1)
         subarbot = ((i+rfac)<= size(anorm)[1]) ? anorm[(i+rfac):min((i+2*rfac-1),end),j:min((j+rfac-1),end)] : missval
         if (sum(subarbot.==missval)<0.5*length(subarbot))
-          mbot=mean(subarbot[subarbot!=missval])
+          mbot=mean(subarbot[subarbot.!=missval])
           cbot=col.colfunc(mbot)
         else
           cbot=col.missval
@@ -169,10 +174,20 @@ function imageterm(ar::Array,ag::Array,ab::Array;hd=false)
 end
 
 function termsize()
-  slines = ccall( (:getenv, "libc"), Ptr{Uint8}, (Ptr{Uint8},), "LINES")
-  scols = ccall( (:getenv, "libc"), Ptr{Uint8}, (Ptr{Uint8},), "COLUMNS")
-  l=int64(bytestring(slines))
-  c=int64(bytestring(scols))
+
+  if (haskey(ENV,"LINES") & haskey(ENV,"COLUMNS"))
+    l=int64(ENV["LINES"])
+    c=int64(ENV["COLUMNS"])
+  else
+    if (isfile("/Net/Groups/BGI/code/julia/tools/ncplot/getcl.so"))
+      l=ccall((:getlines,"/Net/Groups/BGI/code/julia/tools/ncplot/getcl"),Int32,())
+      c=ccall((:getcolumns,"/Net/Groups/BGI/code/julia/tools/ncplot/getcl"),Int32,())
+    else
+      warn("Your terminal size could not be detected. Please run \e[1mexport LINES COLUMNS\e0m")
+      l=20
+      c=40
+    end
+  end
   return(l,c)
 end
 
