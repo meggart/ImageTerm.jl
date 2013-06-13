@@ -1,6 +1,8 @@
 #Plot a 2D-array as an image to the terminal
 #Needs xterm-256color to run properly
 #try to add export TERM=xterm-256color to your .bashrc
+module ImageTerm
+export heatscale,bluescale,greenscale,redscale,rainbow,diffscale,imageterm,MapCols,ncplot,ncplotallsteps
 
 function colstr(r::Integer,g::Integer,b::Integer)
   #r,g,b should be between 1 and 6
@@ -179,9 +181,9 @@ function termsize()
     l=int64(ENV["LINES"])
     c=int64(ENV["COLUMNS"])
   else
-    if (isfile("/Net/Groups/BGI/code/julia/tools/ncplot/getcl.so"))
-      l=ccall((:getlines,"/Net/Groups/BGI/code/julia/tools/ncplot/getcl"),Int32,())
-      c=ccall((:getcolumns,"/Net/Groups/BGI/code/julia/tools/ncplot/getcl"),Int32,())
+    if (isfile("$(Pkg.dir())/ImageTerm/deps/getcl.so"))
+      l=ccall((:getlines,"$(Pkg.dir())/ImageTerm/deps/getcl"),Int32,())
+      c=ccall((:getcolumns,"$(Pkg.dir())/ImageTerm/deps/getcl"),Int32,())
     else
       warn("Your terminal size could not be detected. Please run \e[1mexport LINES COLUMNS\e0m")
       l=20
@@ -189,6 +191,9 @@ function termsize()
     end
   end
   return(l,c)
+end
+
+haskey(Pkg.installed(),"NetCDF") ? include("ncplot.jl") : nothing
 end
 
 
