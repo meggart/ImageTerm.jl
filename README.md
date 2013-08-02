@@ -9,7 +9,7 @@ You should use a terminal emulator that supports 256 colors, for example iTerm f
 
 # Usage
 
-    ImageTerm(x,optional arguments...)
+    imageterm(x,optional arguments...)
 
 here x is a 2d array. The following optional arguments are currently supported:
 
