@@ -1,7 +1,13 @@
 ImageTerm.jl
 ============
 
-Julia functions to plot colorful maps in the terminal
+Julia functions to plot colorful maps in the terminal.
+
+# Screenshots
+
+![screenshot 1](http://i.imgur.com/HFRPLPM.png?2)
+
+![screenshot 2](http://i.imgur.com/dXxFfoe.png)
 
 # Requirements
 
