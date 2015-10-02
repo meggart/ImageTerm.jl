@@ -2,7 +2,12 @@
 #Needs xterm-256color to run properly
 #try to add export TERM=xterm-256color to your .bashrc
 module ImageTerm
-export heatscale,bluescale,greenscale,redscale,rainbow,diffscale,imageterm,MapCols,ncplot,ncplotallsteps
+using Colors
+using Images
+export imageterm,sethd
+const use_hd=Bool[false]
+
+sethd(hd::Bool)=use_hd[1]=hd
 
 function colstr(r::Integer,g::Integer,b::Integer)
   #r,g,b should be between 1 and 6
@@ -11,189 +16,180 @@ function colstr(r::Integer,g::Integer,b::Integer)
   b=min(b,6);b=max(b,1)
   return(36*(r-1)+6*(g-1)+b+15)
 end
-function colstr(r::Real,g::Real,b::Real)
-  return(colstr(iceil(r*6),iceil(g*6),iceil(b*6)))
+function colstr(c::AbstractRGB)
+  return(colstr(ceil(Int,red(c)*6),ceil(Int,green(c)*6),ceil(Int,blue(c)*6)))
 end
 
 function stringfull(c)
-  return("\e[48;5;$(c)m  ")
+  return(string("\e[48;5;",c,"m  "))
 end
 
 function stringtd(ct,cb)
-  return("\e[48;5;$(ct)m\e[38;5;$(cb)m\u2584")
+  return(string("\e[48;5;",ct,"m\e[38;5;",cb,"m\u2584"))
 end
 
-function greystr(r::Integer)
-  #value should be between 1 and 24
-  r=min(r,24);r=max(r,1)
-  return(r+231)
-end
-greystr(r::Real)=greystr(iceil(r*24))
 
-function factorstr(r::Integer)
-  #value should be between 1 and 16
-  r=min(r,16);r=max(r,1)
-  return(r-1)
+abstract Normalization{T}
+immutable LinearNormalization{T} <: Normalization{T}
+  missval::T
+  minval::T
+  maxval::T
 end
 
-function rbramp(v::Real)
-  return colstr(v,0,1-v)
+type ColorMapMiss{T,K}
+  colors::Vector{RGB{T}}
+  misscolor::RGB{T}
+  missval::K
 end
+ColorMapMiss{T,V}(colors::Vector{RGB{T}},misscolor::RGB{V},missval)=ColorMapMiss(colors,convert(RGB{T},misscolor),missval)
 
-function rwbramp(v::Real)
-  return(v < 0.5 ? colstr(2.0*v,2.0*v,1.0) : colstr(1.0,2.0*(1.0-v),2.0*(1.0-v)))
-end
+getColor(c::ColorMapMiss,x::Number)=(x==c.missval) ? c.misscolor : c.colors[round(Int,x*(length(c.colors)-1))+1]
+normalize(n::LinearNormalization,x::Number)= x==n.missval ? x : (x-n.minval)/(n.maxval-n.minval)
+normalize!(n::LinearNormalization,x::Array)=for i in eachindex(x) x[i]=normalize(n,x[i]) end
 
-function byrramp(v::Real)
-  try
-    return(v < 0.5 ? colstr(2.0*v,2.0*v,0.0) : colstr(1.0,2.0*(1.0-v),0.0))
-  catch
-    println("An error v=$v")
-    return(colstr(0.0,0.0,0.0))
-  end
-end
-
-type MapCols
-  colfunc::Function
-  missval
-  normfunc::Function
-  center::Bool
-end
-
-function normcol(x,missval,center)
-  x=float64(x)
-  dmin=min(x[x.!=missval])
-  dmax=max(x[x.!=missval])
-  if (center)
-    m=max(abs(dmin),abs(dmax))
-    dmax=m
-    dmin=-m
-  end
-  if (dmax>dmin)
-    x[x.!=missval]=(x[x.!=missval]-dmin)./(dmax-dmin)
+function getPlotArray(a,npc,npl,transpose)
+  mout=zeros(eltype(a),npl,npc)
+  if transpose
+    f1=(size(a,1)-1)/(npc-1)
+    f2=(size(a,2)-1)/(npl-1)
+    for i=1:npc,j=1:npl
+      mout[j,i]=a[min(round(Int,(i-1)*f1)+1,size(a,1)),min(round(Int,(j-1)*f2)+1,size(a,2))]
+    end
   else
-    warn("Empty data range!")
-    x[x.!=missval]=0.5
+    f1=(size(a,1)-1)/(npl-1)
+    f2=(size(a,2)-1)/(npc-1)
+    for i=1:npc,j=1:npl
+      mout[j,i]=a[min(round(Int,(j-1)*f1)+1,size(a,1)),min(round(Int,(i-1)*f2)+1,size(a,2))]
+    end
   end
-  return(x,dmax,dmin)
+
+  mout
 end
 
-MapCols(colfunc::Function,missval)=MapCols(colfunc,missval,normcol,false)
-MapCols(colfunc::Function)=MapCols(colfunc,greystr(10))
-heatscale=MapCols(byrramp)
-bluescale=MapCols(v->colstr(1.0-v,1.0-v,1.0))
-greenscale=MapCols(v->colstr(1.0-v,1.0,1.0-v))
-redscale=MapCols(v->colstr(1.0,1.0-v,1.0-v),)
-diffscale=MapCols(rwbramp,greystr(10),normcol,true)
-greyscale=MapCols(greystr,greystr(1))
-
-
-function imageterm(a::Array;col::MapCols=heatscale,missval::Number=1.0e32,hd::Bool=false,title::String="",subtitle::String="")
-  ldim=size(a)
-  length(ldim)==2 ? nothing : error("Input data must be 2D array")
-  (l,c)=termsize()
-  hdfac = hd ? 2 : 1
-  rfac = ldim[1]>(hdfac*l) ? iceil(ldim[1]/l/hdfac) : 1
-  rfac = ldim[2]>((hdfac*c-15)/2) ? max(rfac,iceil(ldim[2]/(hdfac*c-15)*2)) : rfac
-  (anorm,dmax,dmin)=col.normfunc(a,missval,col.center)
-  nlines=length(1:(rfac*hdfac):ldim[1])
-  iline=1
-  if (title!="")
-    framewidth=length(1:rfac:ldim[2])*2/hdfac
-    print(string("\n\e[1m",^(" ",int64((framewidth-length(title))/2))),title,"\e[0m\n\n")
+function getMinMax(x,missval)
+  mi=typemax(eltype(x))
+  ma=typemin(eltype(x))
+  for ix in x
+    if ix!=missval
+      if ix<mi mi=ix end
+      if ix>ma ma=ix end
+    end
   end
-  for i=1:(hdfac*rfac):ldim[1]
-    for j=1:rfac:ldim[2]
-      subartop=anorm[i:min((i+rfac-1),end),j:min((j+rfac-1),end)]
-      if (sum(subartop.==missval)<0.5*length(subartop))
-        mtop=mean(subartop[subartop.!=missval])
-        ctop=col.colfunc(mtop)
-      else
-        ctop=col.missval
-      end
-      if (hdfac > 1)
-        subarbot = ((i+rfac)<= size(anorm)[1]) ? anorm[(i+rfac):min((i+2*rfac-1),end),j:min((j+rfac-1),end)] : missval
-        if (sum(subarbot.==missval)<0.5*length(subarbot))
-          mbot=mean(subarbot[subarbot.!=missval])
-          cbot=col.colfunc(mbot)
+  mi,ma
+end
+
+Base.one(x::UTF8String)=""
+
+function imageterm(io,a::AbstractMatrix;col::Vector=colormap("Blues"),missval::Number=1.0e32,misscol=colorant"black",hd::Bool=use_hd[1],title::AbstractString="",subtitle::AbstractString="",transpose=false)
+  ldim=size(a)
+  l,c=Base.tty_size()
+  legendwidth = 15
+  titleheight = title=="" ? 0 : 1
+  # Determine size available for the plot
+  npc = div(c-legendwidth,hd ? 1 : 2)
+  npl = (l-titleheight)*(hd ? 2 : 1)
+  #Determine final plotsize
+  npl,npc=getPlotsize(ldim[1],ldim[2],npl,npc,transpose)
+  #Get the data necessary for plotting from input
+  pa=getPlotArray(a,npc,npl,transpose)
+  #Normalize plotting data to 0..1
+  no=LinearNormalization(pa,convert(eltype(pa),missval))
+  normalize!(no,pa)
+  #
+  cm=ColorMapMiss(col,misscol,missval)
+  #
+  rgbar = pa2rgb(pa,cm)
+  #
+  sa=rgbar2sa(rgbar,hd=hd)
+  #Make the legend
+  sl=get_legend(cm,size(sa,1),no)
+  #Concatenate with plot
+  s=reducedim(string,hcat(sa,sl),2,UTF8String(""))
+  #Join title and subtitle
+  vcat(get_title(title,npc),s,get_subtitle(subtitle,cm))
+  print(io,join(s),"\n")
+end
+imageterm(a::AbstractMatrix;col::Vector=colormap("Blues"),missval::Number=1.0e32,misscol=colorant"black",hd::Bool=use_hd[1],title::AbstractString="",subtitle::AbstractString="",transpose=false)=
+imageterm(STDOUT,a,col=col,missval=missval,misscol=misscol,hd=hd,title=title,subtitle=subtitle,transpose=transpose)
+
+function imageterm(io,img::AbstractImageDirect;hd::Bool=use_hd[1])
+  title=string(colorspace(img), " ", typeof(img).name)
+  subtitle=string("data: ", summary(img.data))
+  transpose=img.properties["spatialorder"][1]=="x" ? true : false
+  imageterm(io,img.data,hd=hd,title=title,transpose=transpose)
+end
+imageterm(img::AbstractImageDirect;hd::Bool=use_hd[1])=imageterm(STDOUT,img,hd=hd)
+
+function imageterm{T<:AbstractRGB}(io,a::AbstractMatrix{T};hd::Bool=use_hd[1],title::AbstractString="",subtitle::AbstractString="",transpose=false)
+  ldim=size(a)
+  l,c=Base.tty_size()
+  titleheight = title=="" ? 0 : 1
+  # Determine size available for the plot
+  npc = div(c,hd ? 1 : 2)
+  npl = (l-titleheight)*(hd ? 2 : 1)
+  #Determine final plotsize
+  npl,npc=getPlotsize(ldim[1],ldim[2],npl,npc,transpose)
+  #Get the data necessary for plotting from input
+  pa=getPlotArray(a,npc,npl,transpose)
+  # Convert to STring representation
+  sa=rgbar2sa(pa,hd=hd)
+  s=reducedim(string,hcat(sa,UTF8String["\e[0m\n" for i=1:size(sa,1), j=1]),2,UTF8String(""))
+  #Join title and subtitle
+  vcat(get_title(title,npc),s,subtitle)
+  print(io,join(s),"\n")
+end
+imageterm{T<:AbstractRGB}(a::AbstractMatrix{T};hd::Bool=false,title::AbstractString="",subtitle::AbstractString="",transpose=false)=
+imageterm{T<:AbstractRGB}(STDOUT,a;hd=hd,title=title,subtitle=subtitle,transpose=transpose)
+
+pa2rgb(pa,cm)=[getColor(cm,pa[irowpa,icol]) for irowpa=1:size(pa,1), icol=1:size(pa,2)]
+
+#Convert values to String Array
+function rgbar2sa(rgbar;hd=false)
+  if hd==false
+    sa=Array(UTF8String,size(rgbar))
+    for i in eachindex(sa)
+      sa[i]=stringfull(colstr(rgbar[i]))
+    end
+  else
+    sa=Array(UTF8String,ceil(Int,size(rgbar,1)/2),size(rgbar,2))
+    irowpa=1
+    for irow=1:size(sa,1)
+      for icol=1:size(sa,2)
+        if irowpa<size(rgbar,2)
+          sa[irow,icol]=stringtd(colstr(rgbar[irowpa,icol]),colstr(rgbar[irowpa+1,icol]))
         else
-          cbot=col.missval
+          sa[irow,icol]=stringtd(colstr(rgbar[irowpa,icol]),colstr(rgbar[irowpa,icol]))
         end
       end
-      hdfac>1 ? print(stringtd(ctop,cbot)) : print(stringfull(ctop))
-    end
-    print("\e[0m ")
-    for ileg=1:2 print(stringfull(col.colfunc((nlines-iline)/(nlines-1)))) end
-    print("\e[0m")
-    @printf("%10.2e",dmin+(nlines-iline)/(nlines-1)*(dmax-dmin))
-    print("\n")
-    iline=iline+1
-  end
-  print("\e[0m")
-  if (subtitle!="")
-    println(subtitle,"; min=$(dmin); max=$(dmax)")
-  end
-end
-
-function imageterm(ar::Array,ag::Array,ab::Array;hd=false)
-  @assert begin size(ar)==size(ag); size(ar)==size(ab) end
-  if (typeof(ar)<:Integer)
-    ar=ar/255.0;ag=ag/255.0;ab=ab/255.0
-  end
-  ar=squeeze(ar);ag=squeeze(ag);ab=squeeze(ab)
-  ldim=size(ar)
-  length(ldim)==2 ? nothing : error("Input data must be 2D array")
-  (l,c)=termsize()
-  hdfac = hd ? 2 : 1
-  rfac = ldim[1]>(hdfac*l) ? iceil(ldim[1]/l/hdfac) : 1
-  rfac = ldim[2]>((hdfac*c)/2) ? max(rfac,iceil(ldim[2]/(hdfac*c)*2)) : rfac
-  nlines=length(1:(rfac*hdfac):ldim[1])
-  iline=1
-  for i=1:(hdfac*rfac):ldim[1]
-    for j=1:rfac:ldim[2]
-      subartopr=ar[i:min((i+rfac-1),end),j:min((j+rfac-1),end)]
-      subartopg=ag[i:min((i+rfac-1),end),j:min((j+rfac-1),end)]
-      subartopb=ab[i:min((i+rfac-1),end),j:min((j+rfac-1),end)]
-      mtopr=mean(subartopr)
-      mtopg=mean(subartopg)
-      mtopb=mean(subartopb)
-      ctop=colstr(mtopr,mtopg,mtopb)
-      if (hdfac > 1)
-        subarbotr = ((i+rfac) <= size(ar)[1]) ? ar[(i+rfac):min((i+2*rfac-1),end),j:min((j+rfac-1),end)] : 0.0
-        subarbotg = ((i+rfac) <= size(ag)[1]) ? ag[(i+rfac):min((i+2*rfac-1),end),j:min((j+rfac-1),end)] : 0.0
-        subarbotb = ((i+rfac) <= size(ab)[1]) ? ab[(i+rfac):min((i+2*rfac-1),end),j:min((j+rfac-1),end)] : 0.0
-        mbotr=mean(subarbotr)
-        mbotg=mean(subarbotg)
-        mbotb=mean(subarbotb)
-        cbot=colstr(mtopr,mtopg,mtopb)
-      end
-      hdfac>1 ? print(stringtd(ctop,cbot)) : print(stringfull(ctop))
-    end
-    print("\e[0m ")
-    print("\n")
-    iline=iline+1
-  end
-end
-
-function termsize()
-
-  if (haskey(ENV,"LINES") & haskey(ENV,"COLUMNS"))
-    l=int64(ENV["LINES"])
-    c=int64(ENV["COLUMNS"])
-  else
-    if (isfile("$(Pkg.dir())/ImageTerm/deps/getcl.so"))
-      l=ccall((:getlines,"$(Pkg.dir())/ImageTerm/deps/getcl"),Int32,())
-      c=ccall((:getcolumns,"$(Pkg.dir())/ImageTerm/deps/getcl"),Int32,())
-    else
-      warn("Your terminal size could not be detected. Please run \e[1mexport LINES COLUMNS\e0m")
-      l=20
-      c=40
+      irowpa+=2
     end
   end
-  return(l,c)
+  sa
 end
 
-haskey(Pkg.installed(),"NetCDF") ? include("ncplot.jl") : nothing
+LinearNormalization(pa,missval)=LinearNormalization(missval,getMinMax(pa,missval)...)
+get_legend(cm,npl,no::Normalization)=UTF8String[string("\e[0m ",repeat(stringfull(colstr(getColor(cm,(npl-iline)/(npl-1)))),2),"\e[0m",@sprintf("%10.2e",no.minval+(npl-iline)/(npl-1)*(no.maxval-no.minval)),"\n") for iline=1:npl]
+
+get_title(title,npc)= title!="" ? string("\n\e[1m",^(" ",round(Int64,(npc-length(title))/2)),title,"\e[0m\n\n") : title
+get_subtitle(subtitle,cm)= subtitle!="" ? "\e[0m; min=$(cm.norm.minval); max=$(cm.norm.maxval)" : subtitle
+
+
+function getPlotsize(slines,scol,l,c,transpose)
+  if transpose slines,scol = scol,slines end
+  asprat=slines/scol
+  if slines>l
+    slines=l
+    scol=round(Int,slines/asprat)
+  end
+  if scol>c
+    scol=c
+    slines=round(Int,scol*asprat)
+  end
+  return slines,scol
 end
 
+# Overwrite writemime for Images
+Base.writemime(io::IO, ::MIME"text/plain", img::AbstractImageDirect) = imageterm(io, img)
 
+#haskey(Pkg.installed(),"NetCDF") ? include("ncplot.jl") : nothing
+end

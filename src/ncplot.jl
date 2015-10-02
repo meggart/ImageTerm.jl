@@ -1,7 +1,6 @@
 using NetCDF
-using ImageTerm
 
-function ncplot(fn::String;hd=false,col::MapCols=heatscale,timavg=true)
+function ncplot(fn::String;hd=false,col::Vector=colormap("Blues"),timavg=true)
   nc = NetCDF.open(fn)
   for va in nc.vars
     v=va[2]
@@ -9,33 +8,21 @@ function ncplot(fn::String;hd=false,col::MapCols=heatscale,timavg=true)
     if ((v.ndim==3) && (timavg==false))
       ncplotallsteps(nc,v,hd,col,totranspose)
     else
-      if ((v.ndim>1) && (v.ndim<4))
-        if v.ndim==2
-          a=NetCDF.readvar(nc,v,[1,1],[-1,-1])
-        elseif v.ndim==3
-          a = readtimavg(nc,v)
-        end
-        # Transpose if lon is first dimension
-        if (totranspose)
-          a=transpose(a)
-        end
-        missval = haskey(v.atts,"missing_value") ? v.atts["missing_value"] : 1.0e32
+      if (v.ndim==2)
+        missval = haskey(v.atts,"missing_value") ? v.atts["missing_value"] : haskey(v.atts,"_FillValue") ? v.atts["missing_value"] : typemax(eltype(v))
         su=haskey(v.atts,"units") ? v.atts["units"] : ""
         su="units = $(su)"
         ti = haskey(v.atts,"long_name") ? v.atts["long_name"] : v.name
-        imageterm(a,missval=missval,hd=hd,col=col,title=ti,subtitle=su)
+        imageterm(v,missval=missval,hd=hd,col=col,title=ti,subtitle=su,transpose=totranspose)
       end
     end
   end
 end
 
 function ncplotallsteps(nc,v,hd,col,totranspose)
-  missval = haskey(v.atts,"missing_value") ? v.atts["missing_value"] : 1.0e32
+  missval = haskey(v.atts,"missing_value") ? v.atts["missing_value"] : haskey(v.atts,"_FillValue") ? v.atts["missing_value"] : typemax(eltype(v))
   for i in 1:v.dim[3].dimlen
     a=NetCDF.readvar(nc,v,[1,1,i],[-1,-1,1])[:,:,1]
-    if (totranspose)
-      a=transpose(a)
-    end
     println("Time step $i of $(v.dim[3].dimlen):")
     imageterm(a,missval=missval,hd=hd,col=col)
   end
