@@ -48,18 +48,18 @@ normalize(n::LinearNormalization,x::Number)= x==n.missval ? x : (x-n.minval)/(n.
 normalize!(n::LinearNormalization,x::Array)=for i in eachindex(x) x[i]=normalize(n,x[i]) end
 
 function getPlotArray(a,npc,npl,transpose)
-  mout=zeros(eltype(a),npl,npc)
+  mout=zeros(elemtype(a),npl,npc)
   if transpose
     f1=(size(a,1)-1)/(npc-1)
     f2=(size(a,2)-1)/(npl-1)
     for i=1:npc,j=1:npl
-      mout[j,i]=a[min(round(Int,(i-1)*f1)+1,size(a,1)),min(round(Int,(j-1)*f2)+1,size(a,2))]
+      mout[j,i]=readval(a,min(round(Int,(i-1)*f1)+1,size(a,1)),min(round(Int,(j-1)*f2)+1,size(a,2)))
     end
   else
     f1=(size(a,1)-1)/(npl-1)
     f2=(size(a,2)-1)/(npc-1)
     for i=1:npc,j=1:npl
-      mout[j,i]=a[min(round(Int,(j-1)*f1)+1,size(a,1)),min(round(Int,(i-1)*f2)+1,size(a,2))]
+      mout[j,i]=readval(a,min(round(Int,(j-1)*f1)+1,size(a,1)),min(round(Int,(i-1)*f2)+1,size(a,2)))
     end
   end
 
@@ -188,6 +188,8 @@ function getPlotsize(slines,scol,l,c,transpose)
   return slines,scol
 end
 
+readval(a::AbstractArray,i,j)=getindex(a,i,j)
+elemtype(a::AbstractArray)=eltype(a)
 # Overwrite writemime for Images
 Base.writemime(io::IO, ::MIME"text/plain", img::AbstractImageDirect) = imageterm(io, img)
 
